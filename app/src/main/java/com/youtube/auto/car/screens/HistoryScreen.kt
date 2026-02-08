@@ -29,6 +29,7 @@ class HistoryScreen(carContext: CarContext) : Screen(carContext) {
 
     @Volatile private var historyVideos: List<Video> = emptyList()
     @Volatile private var isLoading = true
+    @Volatile private var errorMessage: String? = null
 
     init {
         loadHistory()
@@ -37,10 +38,16 @@ class HistoryScreen(carContext: CarContext) : Screen(carContext) {
     private fun loadHistory() {
         lifecycleScope.launch {
             isLoading = true
+            errorMessage = null
             invalidate()
 
-            historyVideos = historyRepository.getRecentHistory(6)
-            isLoading = false
+            try {
+                historyVideos = historyRepository.getRecentHistory(6)
+                isLoading = false
+            } catch (e: Exception) {
+                isLoading = false
+                errorMessage = "Failed to load history"
+            }
             invalidate()
         }
     }
@@ -51,6 +58,19 @@ class HistoryScreen(carContext: CarContext) : Screen(carContext) {
                 .setTitle("History")
                 .setHeaderAction(Action.BACK)
                 .setLoading(true)
+                .build()
+        }
+
+        if (errorMessage != null) {
+            return MessageTemplate.Builder(errorMessage!!)
+                .setTitle("History")
+                .setHeaderAction(Action.BACK)
+                .addAction(
+                    Action.Builder()
+                        .setTitle("Retry")
+                        .setOnClickListener { loadHistory() }
+                        .build()
+                )
                 .build()
         }
 

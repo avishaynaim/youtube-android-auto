@@ -41,6 +41,12 @@ class YouTubeRepository @Inject constructor(
         withContext(Dispatchers.IO) {
             try {
                 val normalizedQuery = normalizeQuery(query)
+                if (normalizedQuery.isBlank()) {
+                    return@withContext Result.Error("Search query cannot be empty")
+                }
+                if (normalizedQuery.length > Constants.MAX_SEARCH_QUERY_LENGTH) {
+                    return@withContext Result.Error("Search query too long")
+                }
 
                 // Check cache first (only for first page)
                 if (pageToken == null) {
@@ -99,7 +105,7 @@ class YouTubeRepository @Inject constructor(
 
                 Result.Success(searchResult)
             } catch (e: Exception) {
-                Result.Error(e.message ?: "Search failed", e)
+                Result.Error(sanitizeErrorMessage(e, "Search failed"), e)
             }
         }
 
@@ -112,11 +118,13 @@ class YouTubeRepository @Inject constructor(
     suspend fun getTrendingVideos(pageToken: String? = null): Result<SearchResult> =
         withContext(Dispatchers.IO) {
             try {
-                // Use in-memory cache for first page
-                if (pageToken == null && trendingCache != null &&
-                    !isCacheExpired(trendingCachedAt, Constants.CACHE_TTL_TRENDING_MS)
-                ) {
-                    return@withContext Result.Success(trendingCache!!)
+                // Use in-memory cache for first page (local capture avoids TOCTOU race)
+                if (pageToken == null) {
+                    val cachedResult = trendingCache
+                    val cachedTime = trendingCachedAt
+                    if (cachedResult != null && !isCacheExpired(cachedTime, Constants.CACHE_TTL_TRENDING_MS)) {
+                        return@withContext Result.Success(cachedResult)
+                    }
                 }
 
                 val response = api.getTrendingVideos(
@@ -152,19 +160,36 @@ class YouTubeRepository @Inject constructor(
                         SearchResult(videos = cached.map { it.toDomain() }, nextPageToken = null, totalResults = cached.size.toLong())
                     )
                 } else {
-                    Result.Error(e.message ?: "Failed to load trending videos", e)
+                    Result.Error(sanitizeErrorMessage(e, "Failed to load trending videos"), e)
                 }
             }
         }
 
-    suspend fun getRelatedVideos(videoId: String): Result<SearchResult> =
+    suspend fun getRelatedVideos(videoId: String, videoTitle: String): Result<SearchResult> =
         withContext(Dispatchers.IO) {
             try {
                 if (!videoId.matches(Regex(Constants.VIDEO_ID_PATTERN))) {
                     return@withContext Result.Error("Invalid video ID")
                 }
 
-                val response = api.getRelatedVideos(videoId = videoId, apiKey = apiKey)
+                // relatedToVideoId was deprecated in Aug 2023. Use keyword search instead.
+                val searchQuery = videoTitle
+                    .replace(Regex("[^\\w\\s]"), "")
+                    .trim()
+                    .split("\\s+".toRegex())
+                    .take(5)
+                    .joinToString(" ")
+
+                if (searchQuery.isBlank()) {
+                    return@withContext Result.Success(
+                        SearchResult(videos = emptyList(), nextPageToken = null, totalResults = 0)
+                    )
+                }
+
+                val response = api.searchRelatedVideos(
+                    query = searchQuery,
+                    apiKey = apiKey
+                )
                 val relatedVideoIds = response.items.orEmpty().mapNotNull { item ->
                     when (val id = item.id) {
                         is String -> id
@@ -175,7 +200,7 @@ class YouTubeRepository @Inject constructor(
                             idObj.videoId
                         }
                     }
-                }
+                }.filter { it != videoId } // Exclude the current video
 
                 val videos = if (relatedVideoIds.isNotEmpty()) {
                     val detailsResponse = api.getVideoDetails(
@@ -195,7 +220,7 @@ class YouTubeRepository @Inject constructor(
                     )
                 )
             } catch (e: Exception) {
-                Result.Error(e.message ?: "Failed to load related videos", e)
+                Result.Error(sanitizeErrorMessage(e, "Failed to load related videos"), e)
             }
         }
 
@@ -223,7 +248,7 @@ class YouTubeRepository @Inject constructor(
                 if (cached != null) {
                     Result.Success(cached.toDomain())
                 } else {
-                    Result.Error(e.message ?: "Failed to load video", e)
+                    Result.Error(sanitizeErrorMessage(e, "Failed to load video"), e)
                 }
             }
         }
@@ -251,7 +276,7 @@ class YouTubeRepository @Inject constructor(
                 if (cached != null) {
                     Result.Success(cached.toDomain())
                 } else {
-                    Result.Error(e.message ?: "Failed to load channel", e)
+                    Result.Error(sanitizeErrorMessage(e, "Failed to load channel"), e)
                 }
             }
         }
@@ -269,13 +294,16 @@ class YouTubeRepository @Inject constructor(
                 val subs = response.items.orEmpty().map { it.toSubscription() }
                 Result.Success(subs)
             } catch (e: Exception) {
-                Result.Error(e.message ?: "Failed to load subscriptions", e)
+                Result.Error(sanitizeErrorMessage(e, "Failed to load subscriptions"), e)
             }
         }
 
     suspend fun getPlaylists(channelId: String, pageToken: String? = null): Result<List<Playlist>> =
         withContext(Dispatchers.IO) {
             try {
+                if (!channelId.matches(Regex(Constants.CHANNEL_ID_PATTERN))) {
+                    return@withContext Result.Error("Invalid channel ID")
+                }
                 val response = api.getPlaylists(
                     channelId = channelId,
                     pageToken = pageToken,
@@ -284,7 +312,7 @@ class YouTubeRepository @Inject constructor(
                 val playlists = response.items.orEmpty().map { it.toPlaylist() }
                 Result.Success(playlists)
             } catch (e: Exception) {
-                Result.Error(e.message ?: "Failed to load playlists", e)
+                Result.Error(sanitizeErrorMessage(e, "Failed to load playlists"), e)
             }
         }
 
@@ -301,7 +329,7 @@ class YouTubeRepository @Inject constructor(
                 val playlists = response.items.orEmpty().map { it.toPlaylist() }
                 Result.Success(playlists)
             } catch (e: Exception) {
-                Result.Error(e.message ?: "Failed to load playlists", e)
+                Result.Error(sanitizeErrorMessage(e, "Failed to load playlists"), e)
             }
         }
 
@@ -338,7 +366,7 @@ class YouTubeRepository @Inject constructor(
                     )
                 )
             } catch (e: Exception) {
-                Result.Error(e.message ?: "Failed to load playlist videos", e)
+                Result.Error(sanitizeErrorMessage(e, "Failed to load playlist videos"), e)
             }
         }
 
@@ -352,7 +380,22 @@ class YouTubeRepository @Inject constructor(
     private fun isCacheExpired(cachedAt: Long, ttl: Long): Boolean {
         return System.currentTimeMillis() - cachedAt > ttl
     }
+
+    private fun sanitizeErrorMessage(e: Exception, fallback: String): String {
+        val message = e.message ?: return fallback
+        // Strip potential API key leaks from error messages
+        return if (message.contains("key=", ignoreCase = true) ||
+            message.contains(apiKey, ignoreCase = true)
+        ) {
+            fallback
+        } else {
+            message
+        }
+    }
 }
+
+// Shared Gson instance for extension functions
+private val sharedGson = Gson()
 
 // Extension functions for model conversion
 private fun VideoItem.toVideo(): Video {
@@ -360,8 +403,8 @@ private fun VideoItem.toVideo(): Video {
         is String -> rawId
         is Map<*, *> -> (rawId as? Map<String, Any>)?.get("videoId") as? String ?: ""
         else -> {
-            val idStr = com.google.gson.Gson().toJson(rawId)
-            val idObj = com.google.gson.Gson().fromJson(idStr, IdObject::class.java)
+            val idStr = sharedGson.toJson(rawId)
+            val idObj = sharedGson.fromJson(idStr, IdObject::class.java)
             idObj.videoId ?: ""
         }
     }

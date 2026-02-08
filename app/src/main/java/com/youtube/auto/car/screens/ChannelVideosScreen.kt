@@ -45,20 +45,51 @@ class ChannelVideosScreen(
             isLoading = true
             invalidate()
 
-            when (val result = repository.searchVideos(channelTitle)) {
+            // Get channel info to find uploads playlist ID
+            when (val channelResult = repository.getChannelInfo(channelId)) {
                 is Result.Success -> {
-                    videos = result.data.videos.take(6)
-                    isLoading = false
-                    errorMessage = null
+                    val channel = channelResult.data
+                    // Use uploads playlist if available, otherwise search by channel name
+                    val uploadsPlaylistId = "UU${channelId.removePrefix("UC")}"
+                    when (val videosResult = repository.getPlaylistVideos(uploadsPlaylistId)) {
+                        is Result.Success -> {
+                            videos = videosResult.data.videos.take(6)
+                            isLoading = false
+                            errorMessage = null
+                        }
+                        is Result.Error -> {
+                            // Fallback: search for videos by channel name
+                            loadViaSearch()
+                            return@launch
+                        }
+                        is Result.Loading -> {}
+                    }
                 }
                 is Result.Error -> {
-                    isLoading = false
-                    errorMessage = result.message
+                    // Fallback: search for videos by channel name
+                    loadViaSearch()
+                    return@launch
                 }
                 is Result.Loading -> {}
             }
             invalidate()
         }
+    }
+
+    private suspend fun loadViaSearch() {
+        when (val result = repository.searchVideos(channelTitle)) {
+            is Result.Success -> {
+                videos = result.data.videos.take(6)
+                isLoading = false
+                errorMessage = null
+            }
+            is Result.Error -> {
+                isLoading = false
+                errorMessage = result.message
+            }
+            is Result.Loading -> {}
+        }
+        invalidate()
     }
 
     override fun onGetTemplate(): Template {
@@ -95,7 +126,7 @@ class ChannelVideosScreen(
             listBuilder.addItem(
                 Row.Builder()
                     .setTitle(video.title.take(60))
-                    .addText("${video.formattedViewCount} views • ${video.formattedDuration}")
+                    .addText("${video.formattedViewCount} views \u2022 ${video.formattedDuration}")
                     .setOnClickListener {
                         screenManager.push(VideoPlayerScreen(carContext, video))
                     }

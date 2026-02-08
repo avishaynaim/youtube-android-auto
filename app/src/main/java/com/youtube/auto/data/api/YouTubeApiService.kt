@@ -71,9 +71,9 @@ interface YouTubeApiService {
     ): YouTubeListResponse<PlaylistItemEntry>
 
     @GET("search")
-    suspend fun getRelatedVideos(
+    suspend fun searchRelatedVideos(
         @Query("part") part: String = "snippet",
-        @Query("relatedToVideoId") videoId: String,
+        @Query("q") query: String,
         @Query("type") type: String = "video",
         @Query("maxResults") maxResults: Int = 15,
         @Query("key") apiKey: String

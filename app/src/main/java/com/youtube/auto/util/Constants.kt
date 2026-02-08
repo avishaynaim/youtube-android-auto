@@ -14,7 +14,8 @@ object Constants {
     const val CACHE_TTL_CHANNEL_MS = 60 * 60 * 1000L   // 1 hour
     const val CACHE_TTL_VIDEO_MS = 24 * 60 * 60 * 1000L // 24 hours
 
-    const val VIDEO_ID_PATTERN = "^[a-zA-Z0-9_-]{1,20}$"
+    const val VIDEO_ID_PATTERN = "^[a-zA-Z0-9_-]{8,20}$"
+    const val MAX_SEARCH_QUERY_LENGTH = 200
     const val CHANNEL_ID_PATTERN = "^UC[a-zA-Z0-9_-]{22}$"
     const val PLAYLIST_ID_PATTERN = "^[a-zA-Z0-9_-]{10,64}$"
 
