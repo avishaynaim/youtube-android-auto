@@ -1,0 +1,11 @@
+# Copy this file to local.properties and fill in your API keys
+# DO NOT commit local.properties to version control
+
+# Android SDK location
+sdk.dir=/path/to/your/Android/Sdk
+
+# YouTube Data API v3 key from Google Cloud Console
+YOUTUBE_API_KEY=YOUR_YOUTUBE_API_KEY_HERE
+
+# Google OAuth 2.0 Client ID from Google Cloud Console
+GOOGLE_CLIENT_ID=YOUR_GOOGLE_CLIENT_ID_HERE
