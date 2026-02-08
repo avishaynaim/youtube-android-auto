@@ -33,12 +33,18 @@ class YouTubeRepository @Inject constructor(
             return key
         }
 
+    private fun normalizeQuery(query: String): String {
+        return query.trim().replace(Regex("\\s+"), " ").lowercase()
+    }
+
     suspend fun searchVideos(query: String, pageToken: String? = null): Result<SearchResult> =
         withContext(Dispatchers.IO) {
             try {
+                val normalizedQuery = normalizeQuery(query)
+
                 // Check cache first (only for first page)
                 if (pageToken == null) {
-                    val cached = searchCacheDao.getCachedSearch(query)
+                    val cached = searchCacheDao.getCachedSearch(normalizedQuery)
                     if (cached != null && !isCacheExpired(cached.cachedAt, Constants.CACHE_TTL_SEARCH_MS)) {
                         val type = object : TypeToken<SearchResult>() {}.type
                         val result = gson.fromJson<SearchResult>(cached.resultJson, type)
@@ -47,7 +53,7 @@ class YouTubeRepository @Inject constructor(
                 }
 
                 val response = api.searchVideos(
-                    query = query,
+                    query = normalizedQuery,
                     pageToken = pageToken,
                     maxResults = Constants.MAX_RESULTS_SEARCH,
                     apiKey = apiKey
@@ -84,7 +90,7 @@ class YouTubeRepository @Inject constructor(
                 // Cache first page results
                 if (pageToken == null) {
                     searchCacheDao.insertSearchCache(
-                        SearchCacheEntity(query = query, resultJson = gson.toJson(searchResult))
+                        SearchCacheEntity(query = normalizedQuery, resultJson = gson.toJson(searchResult))
                     )
                 }
 
@@ -97,9 +103,22 @@ class YouTubeRepository @Inject constructor(
             }
         }
 
+    @Volatile
+    private var trendingCachedAt = 0L
+
+    @Volatile
+    private var trendingCache: SearchResult? = null
+
     suspend fun getTrendingVideos(pageToken: String? = null): Result<SearchResult> =
         withContext(Dispatchers.IO) {
             try {
+                // Use in-memory cache for first page
+                if (pageToken == null && trendingCache != null &&
+                    !isCacheExpired(trendingCachedAt, Constants.CACHE_TTL_TRENDING_MS)
+                ) {
+                    return@withContext Result.Success(trendingCache!!)
+                }
+
                 val response = api.getTrendingVideos(
                     maxResults = Constants.MAX_RESULTS_TRENDING,
                     pageToken = pageToken,
@@ -107,15 +126,26 @@ class YouTubeRepository @Inject constructor(
                 )
                 val videos = response.items.orEmpty().map { it.toVideo() }
                 videoDao.insertVideos(videos.map { it.toEntity() })
-                Result.Success(
-                    SearchResult(
-                        videos = videos,
-                        nextPageToken = response.nextPageToken,
-                        totalResults = response.pageInfo?.totalResults ?: 0L
-                    )
+
+                val result = SearchResult(
+                    videos = videos,
+                    nextPageToken = response.nextPageToken,
+                    totalResults = response.pageInfo?.totalResults ?: 0L
                 )
+
+                // Cache first page in memory
+                if (pageToken == null) {
+                    trendingCache = result
+                    trendingCachedAt = System.currentTimeMillis()
+                }
+
+                Result.Success(result)
             } catch (e: Exception) {
-                // Fall back to cache
+                // Fall back to in-memory or DB cache
+                val memCached = trendingCache
+                if (pageToken == null && memCached != null) {
+                    return@withContext Result.Success(memCached)
+                }
                 val cached = videoDao.getRecentVideos(50)
                 if (cached.isNotEmpty()) {
                     Result.Success(
@@ -124,6 +154,48 @@ class YouTubeRepository @Inject constructor(
                 } else {
                     Result.Error(e.message ?: "Failed to load trending videos", e)
                 }
+            }
+        }
+
+    suspend fun getRelatedVideos(videoId: String): Result<SearchResult> =
+        withContext(Dispatchers.IO) {
+            try {
+                if (!videoId.matches(Regex(Constants.VIDEO_ID_PATTERN))) {
+                    return@withContext Result.Error("Invalid video ID")
+                }
+
+                val response = api.getRelatedVideos(videoId = videoId, apiKey = apiKey)
+                val relatedVideoIds = response.items.orEmpty().mapNotNull { item ->
+                    when (val id = item.id) {
+                        is String -> id
+                        is Map<*, *> -> (id as? Map<String, Any>)?.get("videoId") as? String
+                        else -> {
+                            val idStr = gson.toJson(item.id)
+                            val idObj = gson.fromJson(idStr, IdObject::class.java)
+                            idObj.videoId
+                        }
+                    }
+                }
+
+                val videos = if (relatedVideoIds.isNotEmpty()) {
+                    val detailsResponse = api.getVideoDetails(
+                        id = relatedVideoIds.joinToString(","),
+                        apiKey = apiKey
+                    )
+                    detailsResponse.items.orEmpty().map { it.toVideo() }
+                } else {
+                    emptyList()
+                }
+
+                Result.Success(
+                    SearchResult(
+                        videos = videos,
+                        nextPageToken = response.nextPageToken,
+                        totalResults = response.pageInfo?.totalResults ?: 0L
+                    )
+                )
+            } catch (e: Exception) {
+                Result.Error(e.message ?: "Failed to load related videos", e)
             }
         }
 
@@ -306,6 +378,7 @@ private fun VideoItem.toVideo(): Video {
         duration = contentDetails?.duration.orEmpty(),
         viewCount = statistics?.viewCount?.toLongOrNull() ?: 0,
         likeCount = statistics?.likeCount?.toLongOrNull() ?: 0,
+        commentCount = statistics?.commentCount?.toLongOrNull() ?: 0,
         isLive = snippet?.liveBroadcastContent == "live"
     )
 }
@@ -356,7 +429,7 @@ private fun Video.toEntity(): VideoEntity {
         channelId = channelId, channelTitle = channelTitle,
         thumbnailUrl = thumbnailUrl, publishedAt = publishedAt,
         duration = duration, viewCount = viewCount, likeCount = likeCount,
-        isLive = isLive
+        commentCount = commentCount, isLive = isLive
     )
 }
 
@@ -366,7 +439,7 @@ private fun VideoEntity.toDomain(): Video {
         channelId = channelId, channelTitle = channelTitle,
         thumbnailUrl = thumbnailUrl, publishedAt = publishedAt,
         duration = duration, viewCount = viewCount, likeCount = likeCount,
-        isLive = isLive
+        commentCount = commentCount, isLive = isLive
     )
 }
 

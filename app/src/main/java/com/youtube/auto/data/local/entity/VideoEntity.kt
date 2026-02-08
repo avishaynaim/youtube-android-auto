@@ -15,6 +15,7 @@ data class VideoEntity(
     val duration: String,
     val viewCount: Long,
     val likeCount: Long,
+    val commentCount: Long = 0,
     val isLive: Boolean,
     val cachedAt: Long = System.currentTimeMillis()
 )

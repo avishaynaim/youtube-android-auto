@@ -70,6 +70,15 @@ interface YouTubeApiService {
         @Query("key") apiKey: String
     ): YouTubeListResponse<PlaylistItemEntry>
 
+    @GET("search")
+    suspend fun getRelatedVideos(
+        @Query("part") part: String = "snippet",
+        @Query("relatedToVideoId") videoId: String,
+        @Query("type") type: String = "video",
+        @Query("maxResults") maxResults: Int = 15,
+        @Query("key") apiKey: String
+    ): YouTubeListResponse<VideoItem>
+
     @GET("subscriptions")
     suspend fun getSubscriptions(
         @Query("part") part: String = "snippet",

@@ -15,6 +15,7 @@ data class Video(
     val duration: String,
     val viewCount: Long,
     val likeCount: Long,
+    val commentCount: Long = 0,
     val isLive: Boolean
 ) : Parcelable {
     val formattedViewCount: String
