@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.youtube.auto.auth.AuthState
 import com.youtube.auto.auth.GoogleAuthManager
+import com.youtube.auto.auth.TokenRepository
 import com.youtube.auto.data.model.SearchResult
 import com.youtube.auto.data.model.Subscription
 import com.youtube.auto.data.model.Video
@@ -20,7 +21,8 @@ import javax.inject.Inject
 class MainViewModel @Inject constructor(
     private val repository: YouTubeRepository,
     private val historyRepository: HistoryRepository,
-    private val authManager: GoogleAuthManager
+    private val authManager: GoogleAuthManager,
+    private val tokenRepository: TokenRepository
 ) : ViewModel() {
 
     val authState: StateFlow<AuthState> = authManager.authState
@@ -76,7 +78,10 @@ class MainViewModel @Inject constructor(
 
     fun signOut() {
         viewModelScope.launch {
+            // Sign out from Google first, then clear local data
             authManager.signOut()
+            tokenRepository.clearTokens()
+            repository.cleanExpiredCache()
         }
     }
 }

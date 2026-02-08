@@ -16,6 +16,7 @@ object Constants {
 
     const val VIDEO_ID_PATTERN = "^[a-zA-Z0-9_-]{1,20}$"
     const val CHANNEL_ID_PATTERN = "^UC[a-zA-Z0-9_-]{22}$"
+    const val PLAYLIST_ID_PATTERN = "^[a-zA-Z0-9_-]{10,64}$"
 
     const val PREFS_NAME = "youtube_auto_prefs"
     const val PREF_VIDEO_QUALITY = "video_quality"

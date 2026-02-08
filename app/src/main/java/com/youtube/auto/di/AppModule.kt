@@ -3,6 +3,7 @@ package com.youtube.auto.di
 import android.content.Context
 import androidx.room.Room
 import com.google.gson.Gson
+import com.youtube.auto.auth.AuthTokenRefreshInterceptor
 import com.youtube.auto.data.api.YouTubeApiService
 import com.youtube.auto.data.local.AppDatabase
 import com.youtube.auto.data.local.dao.*
@@ -25,16 +26,19 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(): OkHttpClient {
+    fun provideOkHttpClient(
+        authTokenRefreshInterceptor: AuthTokenRefreshInterceptor
+    ): OkHttpClient {
         val logging = HttpLoggingInterceptor().apply {
             level = if (com.youtube.auto.BuildConfig.DEBUG) {
-                HttpLoggingInterceptor.Level.BODY
+                HttpLoggingInterceptor.Level.BASIC
             } else {
                 HttpLoggingInterceptor.Level.NONE
             }
         }
         return OkHttpClient.Builder()
             .addInterceptor(logging)
+            .addInterceptor(authTokenRefreshInterceptor)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)

@@ -159,6 +159,10 @@ class YouTubeRepository @Inject constructor(
     suspend fun getChannelInfo(channelId: String): Result<Channel> =
         withContext(Dispatchers.IO) {
             try {
+                if (!channelId.matches(Regex(Constants.CHANNEL_ID_PATTERN))) {
+                    return@withContext Result.Error("Invalid channel ID")
+                }
+
                 val cached = channelDao.getChannelById(channelId)
                 if (cached != null && !isCacheExpired(cached.cachedAt, Constants.CACHE_TTL_CHANNEL_MS)) {
                     return@withContext Result.Success(cached.toDomain())
@@ -232,6 +236,10 @@ class YouTubeRepository @Inject constructor(
     suspend fun getPlaylistVideos(playlistId: String, pageToken: String? = null): Result<SearchResult> =
         withContext(Dispatchers.IO) {
             try {
+                if (!playlistId.matches(Regex(Constants.PLAYLIST_ID_PATTERN))) {
+                    return@withContext Result.Error("Invalid playlist ID")
+                }
+
                 val response = api.getPlaylistItems(
                     playlistId = playlistId,
                     pageToken = pageToken,

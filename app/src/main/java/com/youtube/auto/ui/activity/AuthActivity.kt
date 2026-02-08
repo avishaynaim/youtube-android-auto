@@ -11,6 +11,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.CommonStatusCodes
 import com.youtube.auto.R
 import com.youtube.auto.auth.GoogleAuthManager
 import dagger.hilt.android.AndroidEntryPoint
@@ -24,13 +25,26 @@ class AuthActivity : AppCompatActivity() {
     private val signInLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+        val data = result.data
+        if (data == null) {
+            showError("Sign-in cancelled")
+            return@registerForActivityResult
+        }
         try {
+            val task = GoogleSignIn.getSignedInAccountFromIntent(data)
             val account = task.getResult(ApiException::class.java)
             authManager.handleSignInResult(account)
             navigateToMain()
         } catch (e: ApiException) {
-            showError("Sign-in failed: ${e.statusCode}")
+            val message = when (e.statusCode) {
+                CommonStatusCodes.CANCELED,
+                SIGN_IN_CANCELLED_CODE -> "Sign-in cancelled"
+                CommonStatusCodes.NETWORK_ERROR -> "Network error. Please check your connection."
+                else -> "Sign-in failed (code: ${e.statusCode})"
+            }
+            showError(message)
+        } catch (e: Exception) {
+            showError("Sign-in failed unexpectedly")
         }
     }
 
@@ -56,6 +70,7 @@ class AuthActivity : AppCompatActivity() {
     private fun startSignIn() {
         findViewById<ProgressBar>(R.id.progressBar).visibility = View.VISIBLE
         findViewById<Button>(R.id.btnSignIn).isEnabled = false
+        findViewById<TextView>(R.id.tvError).visibility = View.GONE
         signInLauncher.launch(authManager.getSignInIntent())
     }
 
@@ -72,5 +87,9 @@ class AuthActivity : AppCompatActivity() {
             visibility = View.VISIBLE
         }
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+    }
+
+    companion object {
+        private const val SIGN_IN_CANCELLED_CODE = 12501
     }
 }
